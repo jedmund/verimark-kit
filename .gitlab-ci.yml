@@ -31,7 +31,7 @@ build:arch:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb nss pixman libusb cairo gobject-introspection
+    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb nss pixman libusb cairo gobject-introspection systemd-libs libgudev
     - cd libfprint
     - meson setup builddir -Dtests=false -Dexamples=false -Ddoc=false
     - meson compile -C builddir
@@ -49,8 +49,10 @@ build:ubuntu-22.04:
     - if: $CI_COMMIT_TAG
   script:
     - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq
-        meson ninja-build gcc pkg-config libglib2.0-dev libgusb-dev libnss3-dev
+        python3-pip ninja-build gcc pkg-config libglib2.0-dev libgusb-dev libnss3-dev
         libpixman-1-dev libusb-1.0-0-dev libcairo2-dev libgirepository1.0-dev
+        libudev-dev libgudev-1.0-dev
+    - pip3 install --quiet meson
     - cd libfprint
     - meson setup builddir -Dtests=false -Dexamples=false -Ddoc=false
     - meson compile -C builddir
