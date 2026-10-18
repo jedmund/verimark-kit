@@ -1,17 +1,19 @@
 # CI for the Kensington VeriMark driver kit.
 #
-# - Every push: sanity-check the kit contents.
+# - Every push: sanity-check the kit contents; mirror to GitHub.
 # - Tags (v*): build the library on Arch and on Ubuntu 22.04, assemble a
 #   distro-agnostic kit tarball (both prebuilt libs + installer + docs),
-#   publish it to the generic package registry, and create a GitLab
-#   Release with download links.
+#   publish it to the generic package registry, create a GitLab Release,
+#   publish the same assets on GitHub, and update the self-hosted pacman
+#   repository (the pacman-repo branch of the GitHub mirror).
 
 stages:
   - check
   - build
+  - mirror
   - package
   - release
-  - mirror
+  - publish
 
 sanity-check:
   stage: check
@@ -143,7 +145,7 @@ mirror:github:
 
 # Publish the same release assets (tarball + checksums) on GitHub.
 release:github:
-  stage: mirror
+  stage: release
   image: ubuntu:24.04
   rules:
     - if: $CI_COMMIT_TAG
@@ -163,3 +165,52 @@ release:github:
       fi
     - gh release upload "${CI_COMMIT_TAG}" --repo jedmund/verimark-kit --clobber
         "dist/verimark-kit-${CI_COMMIT_TAG}.tar.gz" "dist/SHA256SUMS"
+
+# Build the Arch package (aur/PKGBUILD) for the self-hosted pacman repo.
+# The source archive is pulled from the GitHub tag, which mirror:github
+# (this pipeline, earlier stage) has just ensured exists.
+pkg:arch:
+  stage: package
+  image: archlinux:base-devel
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs: [mirror:github]
+  script:
+    - pacman -Syu --noconfirm --needed base-devel fprintd meson ninja pkgconf glib2 glib2-devel libgusb libusb
+    - cd aur
+    - sed -i "s/^pkgver=.*/pkgver=${CI_COMMIT_TAG#v}/" PKGBUILD
+    - useradd -m builder && chown -R builder .
+    - su builder -c "makepkg -f --skipinteg"
+    - mkdir -p "$CI_PROJECT_DIR/artifacts/archpkg"
+    - mv verimark-kit-*.pkg.tar.zst "$CI_PROJECT_DIR/artifacts/archpkg/"
+  artifacts:
+    paths:
+      - artifacts/
+    expire_in: 1 week
+
+# Publish/update the pacman repository: the pacman-repo branch of the
+# GitHub mirror holds x86_64/*.pkg.tar.zst + the repo database. Users
+# point pacman at raw.githubusercontent.com (see README.md).
+publish:pacman-repo:
+  stage: publish
+  image: archlinux:base-devel
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs: [pkg:arch]
+  script:
+    - pacman -Syu --noconfirm --needed git
+    - git config --global user.email "ci@verimark-kit" && git config --global user.name "verimark-kit CI"
+    - |
+      if ! git clone --depth 1 --branch pacman-repo "https://x-access-token:${GITHUB_TOKEN}@github.com/jedmund/verimark-kit.git" repo 2>/dev/null; then
+        git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/jedmund/verimark-kit.git" repo
+        cd repo && git checkout --orphan pacman-repo && git rm -rf --quiet . && cd ..
+      fi
+    - mkdir -p repo/verimark/x86_64
+    - cp artifacts/archpkg/*.pkg.tar.zst repo/verimark/x86_64/
+    - cd repo/verimark/x86_64
+    - repo-add verimark.db.tar.gz *.pkg.tar.zst
+    - cp verimark.db.tar.gz verimark.db
+    - cd ../..
+    - git add -f verimark/
+    - 'git commit -m "pacman repo: verimark-kit ${CI_COMMIT_TAG}"'
+    - git push origin pacman-repo

@@ -51,6 +51,27 @@ cd verimark-kit
 sudo ./install.sh
 ```
 
+**Option C — pacman repository (Arch only).** Every release
+automatically builds the Arch package and updates a self-hosted pacman
+repository. Add this to `/etc/pacman.conf`:
+
+```
+[verimark]
+SigLevel = Optional TrustAll
+Server = https://raw.githubusercontent.com/jedmund/verimark-kit/pacman-repo/$repo/$arch
+```
+
+then:
+
+```
+sudo pacman -Syu verimark-kit
+```
+
+(The repo is unsigned; that's what `SigLevel = Optional TrustAll` is
+for — drop it if/when packages become signed. The package installs the
+driver to `/usr/lib/verimark`, an fprintd vendor drop-in, and the
+`verimark-pam` helper; it does not touch `/etc`.)
+
 The installer:
 1. detects your distro and picks the matching prebuilt library
 2. installs it to `/opt/verimark/libfprint`
