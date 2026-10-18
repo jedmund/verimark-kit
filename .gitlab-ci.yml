@@ -31,9 +31,9 @@ build:arch:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb nss pixman libusb cairo gobject-introspection systemd-libs libgudev
+    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb libusb
     - cd libfprint
-    - meson setup builddir -Dtests=false -Dexamples=false -Ddoc=false
+    - meson setup builddir -Ddrivers=realtek -Dtests=false -Dexamples=false -Ddoc=false -Dintrospection=false
     - meson compile -C builddir
     - mkdir -p "$CI_PROJECT_DIR/artifacts/arch"
     - cp builddir/libfprint/libfprint-2.so.2.0.0 "$CI_PROJECT_DIR/artifacts/arch/"
@@ -49,12 +49,11 @@ build:ubuntu-22.04:
     - if: $CI_COMMIT_TAG
   script:
     - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq
-        python3-pip ninja-build gcc pkg-config libglib2.0-dev libgusb-dev libnss3-dev
-        libpixman-1-dev libusb-1.0-0-dev libcairo2-dev libgirepository1.0-dev
-        libudev-dev libgudev-1.0-dev
+        python3-pip ninja-build gcc pkg-config libglib2.0-dev libgusb-dev
+        libusb-1.0-0-dev
     - pip3 install --quiet meson
     - cd libfprint
-    - meson setup builddir -Dtests=false -Dexamples=false -Ddoc=false
+    - meson setup builddir -Ddrivers=realtek -Dtests=false -Dexamples=false -Ddoc=false -Dintrospection=false
     - meson compile -C builddir
     - mkdir -p "$CI_PROJECT_DIR/artifacts/ubuntu-22.04"
     - cp builddir/libfprint/libfprint-2.so.2.0.0 "$CI_PROJECT_DIR/artifacts/ubuntu-22.04/"
