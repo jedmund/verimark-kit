@@ -13,6 +13,7 @@ pkgbase = verimark-kit
 	depends = libgusb
 	depends = libusb
 	depends = fprintd
+	options = !debug
 	source = verimark-kit-1.1.1.tar.gz::https://github.com/jedmund/verimark-kit/archive/refs/tags/v1.1.1.tar.gz
 	sha256sums = 2043347544c51a24887ad71dee4c363ad42af6845d0328bfff8af56af22978c1
 

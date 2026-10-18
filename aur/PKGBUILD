@@ -7,6 +7,7 @@ pkgdesc="Kensington VeriMark (047d:8228) fingerprint driver for libfprint — pa
 arch=('x86_64')
 url="https://github.com/jedmund/verimark-kit"
 license=('LGPL2.1')
+options=('!debug')
 depends=('glib2' 'libgusb' 'libusb' 'fprintd')
 makedepends=('meson' 'ninja' 'pkgconf' 'glib2-devel')
 checkdepends=()
