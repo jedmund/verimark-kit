@@ -1,0 +1,19 @@
+pkgbase = verimark-kit
+	pkgdesc = Kensington VeriMark (047d:8228) fingerprint driver for libfprint — patched realtek driver, fprintd drop-in, PAM helper
+	pkgver = 1.1.1
+	pkgrel = 1
+	url = https://github.com/jedmund/verimark-kit
+	arch = x86_64
+	license = LGPL2.1
+	makedepends = meson
+	makedepends = ninja
+	makedepends = pkgconf
+	makedepends = glib2-devel
+	depends = glib2
+	depends = libgusb
+	depends = libusb
+	depends = fprintd
+	source = verimark-kit-1.1.1.tar.gz::https://github.com/jedmund/verimark-kit/archive/refs/tags/v1.1.1.tar.gz
+	sha256sums = 2043347544c51a24887ad71dee4c363ad42af6845d0328bfff8af56af22978c1
+
+pkgname = verimark-kit
