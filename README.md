@@ -25,6 +25,17 @@ screen). Developed and tested on Arch Linux, October 2026.
 
 ## Install (the easy path)
 
+**Option A — download a release tarball** (Releases page → download
+`verimark-kit-<tag>.tar.gz`, then verify with the attached `SHA256SUMS`):
+
+```
+tar xzf verimark-kit-<tag>.tar.gz
+cd verimark-kit
+sudo ./install.sh
+```
+
+**Option B — clone this repo:**
+
 ```
 cd ~/Downloads/verimark-kit
 sudo ./install.sh
