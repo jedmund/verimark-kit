@@ -31,9 +31,9 @@ build:arch:
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb libusb
+    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 glib2-devel libgusb libusb
     - cd libfprint
-    - meson setup builddir -Ddrivers=realtek -Dtests=false -Dexamples=false -Ddoc=false -Dintrospection=false
+    - meson setup builddir -Ddrivers=realtek -Dtests=false -Dexamples=false -Ddoc=false -Dintrospection=false -Dudev_rules=disabled -Dudev_hwdb=disabled
     - meson compile -C builddir
     - mkdir -p "$CI_PROJECT_DIR/artifacts/arch"
     - cp builddir/libfprint/libfprint-2.so.2.0.0 "$CI_PROJECT_DIR/artifacts/arch/"
@@ -53,7 +53,7 @@ build:ubuntu-22.04:
         libusb-1.0-0-dev
     - pip3 install --quiet meson
     - cd libfprint
-    - meson setup builddir -Ddrivers=realtek -Dtests=false -Dexamples=false -Ddoc=false -Dintrospection=false
+    - meson setup builddir -Ddrivers=realtek -Dtests=false -Dexamples=false -Ddoc=false -Dintrospection=false -Dudev_rules=disabled -Dudev_hwdb=disabled
     - meson compile -C builddir
     - mkdir -p "$CI_PROJECT_DIR/artifacts/ubuntu-22.04"
     - cp builddir/libfprint/libfprint-2.so.2.0.0 "$CI_PROJECT_DIR/artifacts/ubuntu-22.04/"
