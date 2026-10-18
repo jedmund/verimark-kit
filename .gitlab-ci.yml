@@ -1,9 +1,14 @@
-# Release pipeline: tags (v*) are packaged into a tarball, published to the
-# generic package registry, and turned into a GitLab Release with download
-# links — so anyone with access can grab a ready-to-use kit.
+# CI for the Kensington VeriMark driver kit.
+#
+# - Every push: sanity-check the kit contents.
+# - Tags (v*): build the library on Arch and on Ubuntu 22.04, assemble a
+#   distro-agnostic kit tarball (both prebuilt libs + installer + docs),
+#   publish it to the generic package registry, and create a GitLab
+#   Release with download links.
 
 stages:
   - check
+  - build
   - package
   - release
 
@@ -13,23 +18,70 @@ sanity-check:
   script:
     - apk add --no-cache bash
     - bash -n install.sh
-    - test -f prebuilt/libfprint-2.so.2.0.0
-    - test -f src/realtek.c
-    - test -f src/realtek.h
+    - test -f prebuilt/arch/libfprint-2.so.2.0.0
+    - test -f libfprint/libfprint/drivers/realtek/realtek.c
+    - test -f libfprint/libfprint/drivers/realtek/realtek.h
+    - test -f libfprint/meson.build
     - test -f systemd/override.conf
     - echo "kit contents OK"
+
+.build: &build
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG
+  variables:
+    BUILD_OPTS: "-Dtests=false -Dexamples=false -Ddoc=false"
+  script:
+    - meson setup builddir ${BUILD_OPTS}
+    - meson compile -C builddir
+    - mkdir -p "artifacts/${LIB_DIR_NAME}"
+    - cp builddir/libfprint/libfprint-2.so.2.0.0 "artifacts/${LIB_DIR_NAME}/"
+  artifacts:
+    paths:
+      - artifacts/
+    expire_in: 1 week
+
+build:arch:
+  <<: *build
+  image: archlinux:base-devel
+  variables:
+    LIB_DIR_NAME: arch
+    BUILD_OPTS: "-Dtests=false -Dexamples=false -Ddoc=false"
+  script:
+    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb nss pixman libusb
+    - !reference [.build, script]
+
+build:ubuntu-22.04:
+  <<: *build
+  image: ubuntu:22.04
+  variables:
+    LIB_DIR_NAME: ubuntu-22.04
+    BUILD_OPTS: "-Dtests=false -Dexamples=false -Ddoc=false"
+  script:
+    - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq
+        meson ninja-build gcc pkg-config libglib2.0-dev libgusb-dev libnss3-dev
+        libpixman-1-dev libusb-1.0-0-dev
+    - !reference [.build, script]
 
 package:
   stage: package
   image: alpine:3.20
   rules:
     - if: $CI_COMMIT_TAG
+  needs: [build:arch, build:ubuntu-22.04]
   script:
     - apk add --no-cache tar curl
+    - mkdir -p "kit/prebuilt/arch" "kit/prebuilt/ubuntu-22.04"
+    - cp install.sh README.md .gitlab-ci.yml kit/
+    - cp -r systemd pam docs kit/
+    - cp artifacts/arch/libfprint-2.so.2.0.0 kit/prebuilt/arch/
+    - cp artifacts/ubuntu-22.04/libfprint-2.so.2.0.0 kit/prebuilt/ubuntu-22.04/
+    - cp -r libfprint kit/libfprint
+    - rm -rf kit/libfprint/builddir
+    - mv kit "verimark-kit-${CI_COMMIT_TAG}"
+    - tar czf "verimark-kit-${CI_COMMIT_TAG}.tar.gz" --owner=0 --group=0 "verimark-kit-${CI_COMMIT_TAG}"
     - mkdir -p dist
-    - tar czf "dist/verimark-kit-${CI_COMMIT_TAG}.tar.gz"
-        --exclude-vcs --exclude=./dist --owner=0 --group=0
-        --transform "s,^\./,verimark-kit/," .
+    - mv "verimark-kit-${CI_COMMIT_TAG}.tar.gz" dist/
     - (cd dist && sha256sum "verimark-kit-${CI_COMMIT_TAG}.tar.gz" > SHA256SUMS)
     - "curl --silent --show-error --fail
         --header \"JOB-TOKEN: ${CI_JOB_TOKEN}\"
@@ -57,11 +109,14 @@ create-release:
     name: "VeriMark kit ${CI_COMMIT_TAG}"
     description: |
       Kensington VeriMark Desktop 2.0 (047d:8228, Realtek RTS58xx) driver
-      kit for Linux — patched libfprint realtek driver, prebuilt library,
-      installer, PAM wiring and reverse-engineering notes.
+      kit for Linux — patched libfprint realtek driver, prebuilt libraries
+      for Arch and Ubuntu 22.04+, installer, PAM wiring and
+      reverse-engineering notes.
 
       **Get started:** download the tarball, extract, then
       `cd verimark-kit && sudo ./install.sh && fprintd-enroll`.
+      The installer detects your distro (Arch or Debian/Ubuntu family)
+      and picks the matching prebuilt library and PAM file.
       See README.md inside the tarball for details and known pitfalls.
     assets:
       links:

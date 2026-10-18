@@ -1,0 +1,39 @@
+; libfprint integration fragments for the validity-0088 driver.
+;
+; Two upstream meson files need entries added.
+;
+; ---------------------------------------------------------------------------
+; 1) libfprint/libfprint/meson.build  (the INNER one)
+;
+;    Add to the `driver_sources` dictionary alongside the other drivers:
+;
+;   'validity_0088' :
+;       [ 'drivers/validity-0088/validity.c',
+;         'drivers/validity-0088/validity-capture-builder.c',
+;         'drivers/validity-0088/validity-commands.c',
+;         'drivers/validity-0088/validity-crypto.c',
+;         'drivers/validity-0088/validity-handshake.c',
+;         'drivers/validity-0088/validity-init-data.c',
+;         'drivers/validity-0088/validity-init-clean-slate.c',
+;         'drivers/validity-0088/validity-enroll-data.c',
+;         'drivers/validity-0088/validity-pairing.c',
+;         'drivers/validity-0088/validity-pretls-pair.c',
+;         'drivers/validity-0088/validity-pubkeys.c' ],
+;
+; ---------------------------------------------------------------------------
+; 2) libfprint/meson.build  (the OUTER one, in the project root)
+;
+;    Add to the `driver_helper_mapping` dictionary so the driver gets
+;    linked against libcrypto:
+;
+;   'validity_0088' : [ 'openssl' ],
+;
+; ---------------------------------------------------------------------------
+;
+; The driver dictionary key MUST be 'validity_0088' (underscore), not
+; 'validity-0088' — upstream libfprint's meson pastes the key directly
+; into a generated C identifier in `fpi-drivers.c`, and a hyphen there
+; produces invalid C. The directory and file paths stay as `validity-0088`.
+;
+; Build with `-Ddrivers=validity_0088`. The driver registers the device
+; VID:PID (06CB:0088) in its FpIdEntry table inside validity.c.

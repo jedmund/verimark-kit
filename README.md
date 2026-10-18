@@ -2,31 +2,39 @@
 
 Everything needed to get the Kensington VeriMark Desktop 2.0 (Kensington
 047d:8228, Realtek RTS58xx / Atans firmware) working on Linux with
-libfprint 1.94.x, fprintd, and PAM (sudo / polkit / SDDM login / KDE lock
-screen). Developed and tested on Arch Linux, October 2026.
+libfprint 1.94.x, fprintd, and PAM (sudo / polkit / display-manager login
+/ lock screen). Developed and tested on Arch Linux; CI also builds the
+library on Ubuntu 22.04. October 2026.
 
 ## What's in the kit
 
 | Path | What it is |
 |---|---|
-| `prebuilt/libfprint-2.so.2.0.0` | Ready-built libfprint including the working realtek driver (the easy path) |
-| `src/realtek.c`, `src/realtek.h` | The patched driver sources, if you want to rebuild against your own libfprint tree |
+| `install.sh` | One-shot installer (root) — detects Arch vs Debian/Ubuntu, installs the matching prebuilt library, wires PAM |
+| `prebuilt/arch/` | libfprint built on Arch (the proven, tested binary) |
+| `prebuilt/ubuntu-22.04/` | libfprint built on Ubuntu 22.04 (CI; runs on Ubuntu 22.04+, Debian 12+, Mint, Pop!_OS) |
+| `libfprint/` | The full patched libfprint source tree (see `libfprint/KIT-NOTES.md`) — rebuild anywhere |
 | `systemd/override.conf` | fprintd systemd drop-in that makes fprintd load the custom library |
-| `pam/` | The PAM line to add (install.sh does it for you) |
+| `pam/` | Example PAM wiring for both distros (install.sh does it for you) |
 | `docs/FINDINGS.md` | Full reverse-engineering notes (protocol, addenda 1–11) |
 | `docs/upstream-issue-draft.md` | Draft issue for libfprint upstream |
-| `install.sh` | One-shot installer (root) |
+
+The stock libfprint has no driver for this device at all — the driver is
+a from-scratch port based on a Windows-driver reverse engineering
+(`docs/FINDINGS.md`).
 
 ## Requirements
 
-- Arch Linux (or any distro with stock `libfprint` + `fprintd` packages)
+- Arch Linux, or Ubuntu 22.04+ / Debian 12+ (Linux Mint / Pop!_OS work too)
 - The device: `lsusb` should show `047d:8228` (Kensington VeriMark)
-- `fprintd` installed (`pacman -S fprintd`)
+- `fprintd` (plus `libpam-fprintd` on Ubuntu) — the installer tells you
+  the exact command if they're missing
 
 ## Install (the easy path)
 
 **Option A — download a release tarball** (Releases page → download
-`verimark-kit-<tag>.tar.gz`, then verify with the attached `SHA256SUMS`):
+`verimark-kit-<tag>.tar.gz`, verify with the attached `SHA256SUMS`;
+tarballs ship prebuilt libraries for both distro families):
 
 ```
 tar xzf verimark-kit-<tag>.tar.gz
@@ -34,19 +42,24 @@ cd verimark-kit
 sudo ./install.sh
 ```
 
-**Option B — clone this repo:**
+**Option B — clone this repo** (prebuilt library currently included for
+Arch only; on Ubuntu, use a release tarball or build from `libfprint/`):
 
 ```
-cd ~/Downloads/verimark-kit
+git clone https://git.atelier.house/jedmund/verimark-kit.git
+cd verimark-kit
 sudo ./install.sh
 ```
 
-This:
-1. copies the prebuilt library to `/opt/verimark/libfprint`
-2. installs the systemd drop-in (`/etc/systemd/system/fprintd.service.d/override.conf`)
+The installer:
+1. detects your distro and picks the matching prebuilt library
+2. installs it to `/opt/verimark/libfprint`
+3. installs the systemd drop-in (`/etc/systemd/system/fprintd.service.d/override.conf`)
    so fprintd loads it via `LD_LIBRARY_PATH`
-3. adds `auth sufficient pam_fprintd.so` to `/etc/pam.d/system-auth`
-4. restarts fprintd
+4. adds `auth sufficient pam_fprintd.so` to your PAM stack
+   (`/etc/pam.d/system-auth` on Arch, `/etc/pam.d/common-auth` on
+   Debian/Ubuntu)
+5. restarts fprintd
 
 ## Enroll and test
 
@@ -64,21 +77,36 @@ fprintd-verify $USER          # match with the enrolled finger,
 fprintd-list $USER            # the finger must still be listed!
 ```
 
-Then fingerprint works for `sudo`, `pkexec`/polkit prompts, the SDDM
-login screen, and the KDE lock screen — all of them chain through
-`/etc/pam.d/system-auth` on Arch.
+Fingerprint auth then works for `sudo`, `pkexec`/polkit prompts, the
+display-manager login screen, and the lock screen:
 
-## Rebuilding from source (optional)
+- **Arch**: everything chains through `/etc/pam.d/system-auth`
+  (sudo, polkit-1, sddm, KDE lock screen via `/usr/lib/pam.d/kde`).
+- **Ubuntu/Debian**: everything includes `/etc/pam.d/common-auth`
+  (sudo, polkit, GDM login; GDM's own fingerprint stack is also fine).
 
-`src/realtek.c` / `src/realtek.h` drop into an existing libfprint source
-tree at `libfprint/drivers/realtek/` (the tree in use lives at
-`~/verimark/libfprint`, built with `meson compile -C builddir`). If you
-rebuild, install the resulting `libfprint-2.so.2.0.0` the same way
-(see `install.sh`) or adjust the `BindReadOnlyPaths` in the drop-in.
+You can also enroll from the desktop settings app (KDE System Settings →
+Users → fingerprint, GNOME Settings → Users → Fingerprint Login) — it's
+a GUI for the same fprintd API.
 
-The current machine (the one this kit was created on) still loads its
-build directly from `~/verimark/libfprint/builddir` via its existing
-drop-in — running this kit's `install.sh` here would switch it to
+## Building from source
+
+`libfprint/` is the full patched tree:
+
+```
+cd libfprint
+meson setup builddir -Dtests=false -Dexamples=false
+meson compile -C builddir
+```
+
+Then install the result the same way `install.sh` does (or adjust the
+`BindReadOnlyPaths` in the drop-in). CI does exactly this for both
+distros — see `.gitlab-ci.yml`. The driver of interest is
+`libfprint/libfprint/drivers/realtek/realtek.{c,h}`.
+
+Note: the machine this kit was developed on still loads its build
+directly from `~/verimark/libfprint/builddir` via its own drop-in —
+running this kit's `install.sh` there switches it to
 `/opt/verimark/libfprint`, which is fine.
 
 ## Known pitfalls (do not re-introduce these!)

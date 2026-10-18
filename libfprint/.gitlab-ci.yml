@@ -1,0 +1,395 @@
+include:
+  - local: '.gitlab-ci/libfprint-image-variables.yaml'
+  - local: '.gitlab-ci/libfprint-templates.yaml'
+  - project: 'freedesktop/ci-templates'
+    ref: master
+    file: '/templates/fedora.yml'
+  - remote: 'https://gitlab.gnome.org/GNOME/citemplates/-/raw/71e636e012ae0ab04c5e0fe40ca73ada91ae6bde/flatpak/flatpak_ci_initiative.yml'
+
+default:
+  interruptible: true
+  # Auto-retry jobs in case of infra failures
+  retry:
+    max: 1
+    when:
+      - 'runner_system_failure'
+      - 'stuck_or_timeout_failure'
+      - 'scheduler_failure'
+      - 'api_failure'
+
+variables:
+  extends: .libfprint_common_variables
+  FDO_DISTRIBUTION_TAG: $LIBFPRINT_IMAGE_TAG
+  FDO_DISTRIBUTION_VERSION: rawhide
+  FDO_UPSTREAM_REPO: "libfprint/$CI_PROJECT_NAME"
+  FEDORA_IMAGE: "registry.freedesktop.org/libfprint/$CI_PROJECT_NAME/fedora/$FDO_DISTRIBUTION_VERSION:$FDO_DISTRIBUTION_TAG"
+  FEDORA_IMAGE_S390X: "registry.freedesktop.org/libfprint/$CI_PROJECT_NAME/fedora/$FDO_DISTRIBUTION_VERSION-s390x:$LIBFPRINT_IMAGE_TAG"
+  LAST_ABI_BREAK: "056ea541ddc97f5806cffbd99a12dc87e4da3546"
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_PIPELINE_SOURCE == 'push'
+    - if: $CI_PIPELINE_SOURCE == 'schedule'
+    - if: $CI_PROJECT_NAMESPACE == 'libfprint' && $LIBFPRINT_CI_ACTION != ''
+
+stages:
+  - image-build
+  - check-source
+  - build
+  - test
+  - flatpak
+  - deploy
+
+image: $FEDORA_IMAGE
+
+.build_one_driver_template: &build_one_driver
+  script:
+    # Build with a driver that doesn't need imaging, or openssl
+    - meson setup _build --werror -Ddrivers=$driver
+    - meson compile -C _build
+    - rm -rf _build/
+
+.build_template: &build
+  script:
+    # And build with everything
+    - meson setup _build --werror -Ddrivers=all
+    - meson compile -C _build
+    - meson install -C _build
+
+.build_template: &check_abi
+  script:
+    - ./.ci/check-abi ${LAST_ABI_BREAK} $(git rev-parse HEAD)
+
+.standard_job:
+  rules:
+    - when: on_success
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+
+build:
+  stage: build
+  extends:
+    - .standard_job
+  variables:
+    driver: virtual_image
+  <<: *build_one_driver
+  <<: *build
+#  <<: *check_abi
+  artifacts:
+    expose_as: "HTML Documentation"
+    paths:
+    - _build/doc/html
+    - _build/doc/html/index.html
+    expire_in: 1 week
+
+test:
+  stage: test
+  extends:
+    - .standard_job
+  script:
+    - meson setup _build --werror -Ddrivers=all -Db_coverage=true
+    - meson test -C _build --print-errorlogs --no-stdsplit --timeout-multiplier 3
+    # We can't use `meson compile` https://github.com/mesonbuild/meson/issues/7895
+    - ninja -C _build coverage
+    - cat _build/meson-logs/coverage.txt || true
+  artifacts:
+    reports:
+      junit: "_build/meson-logs/testlog.junit.xml"
+      coverage_report:
+        coverage_format: cobertura
+        path: _build/meson-logs/coverage.xml
+    expose_as: 'Coverage Report'
+    when: always
+    paths:
+      - _build/meson-logs
+      - _build/meson-logs/coveragereport/index.html
+    expire_in: 1 week
+  coverage: '/^TOTAL.*\s+(\d+\%)$/'
+
+test_valgrind:
+  stage: test
+  extends:
+    - .standard_job
+  script:
+    - meson setup _build -Ddrivers=all
+    - meson compile -C _build
+    - meson test -C _build --print-errorlogs --no-stdsplit --setup=valgrind
+  artifacts:
+    reports:
+      junit: "_build/meson-logs/testlog-valgrind.junit.xml"
+    expose_as: 'Valgrind test logs'
+    when: always
+    paths:
+      - _build/meson-logs
+      - _build/meson-logs/testlog-valgrind.txt
+    expire_in: 1 week
+
+test_asan:
+  stage: test
+  extends:
+    - .standard_job
+  script:
+    - meson setup _build -Ddrivers=all -Db_sanitize=address,undefined
+    - meson test -C _build --print-errorlogs --no-stdsplit
+  artifacts:
+    reports:
+      junit: "_build/meson-logs/testlog.junit.xml"
+    expose_as: 'Sanitizers test logs'
+    when: always
+    paths:
+      - _build/meson-logs
+      - _build/meson-logs/testlog.txt
+    expire_in: 1 week
+
+test_installed:
+  stage: test
+  extends:
+    - .standard_job
+  script:
+    - meson setup _build --prefix=/usr -Ddrivers=all
+    - meson install -C _build
+    - mv _build _build_dir
+    - rm -rf tests
+    - gnome-desktop-testing-runner --list libfprint-2
+    - gnome-desktop-testing-runner libfprint-2
+        --report-directory=_installed-tests-report/failed/
+        --log-directory=_installed-tests-report/logs/
+        --parallel=0
+  artifacts:
+    expose_as: 'GNOME Tests Runner logs'
+    when: always
+    paths:
+      - _build_dir/meson-logs
+      - _installed-tests-report
+    expire_in: 1 week
+
+
+test_scan_build:
+  stage: test
+  extends:
+    - .standard_job
+  allow_failure: true
+  script:
+    - meson setup _build -Ddrivers=all
+    # Wrapper to add --status-bugs and disable malloc checker
+    - SCANBUILD=$CI_PROJECT_DIR/.gitlab-ci/scan-build
+      ninja -C _build scan-build
+  artifacts:
+    when: on_failure
+    paths:
+      - _build/meson-logs
+    expire_in: 1 week
+
+test_indent:
+  stage: check-source
+  extends:
+    - .standard_job
+  script:
+    - scripts/uncrustify.sh
+    - git diff
+    - git diff-index --name-only --exit-code HEAD
+  rules:
+    - changes:
+        compare_to: 'refs/heads/master'
+        paths:
+          - '**/*.c'
+          - '**/*.h'
+
+test_unsupported_list:
+  stage: check-source
+  extends:
+    - .standard_job
+  allow_failure: true
+  variables:
+    FPRINT_HWDB_LIST: libfprint/fprint-list-udev-hwdb.c
+  script:
+    - scripts/sync-unsupported-devices.py $FPRINT_HWDB_LIST
+    - git diff --color=always --exit-code $FPRINT_HWDB_LIST
+
+flatpak:
+  stage: flatpak
+  extends: .flatpak@x86_64
+  variables:
+    MANIFEST_PATH: "demo/org.freedesktop.libfprint.Demo.json"
+    FLATPAK_MODULE: "libfprint"
+    APP_ID: "org.freedesktop.libfprint.Demo"
+    BUNDLE: "org.freedesktop.libfprint.Demo.flatpak"
+    RUNTIME_REPO: "https://nightly.gnome.org/gnome-nightly.flatpakrepo"
+  # Build with any builder
+  tags: []
+  rules:
+    - if: '$CI_PROJECT_PATH != "libfprint/libfprint"'
+      when: manual
+      allow_failure: true
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      allow_failure: true
+      when: always
+    - if: '$CI_COMMIT_TAG'
+      allow_failure: true
+      when: always
+    # For any other (commit), allow manual run.
+    # This excludes MRs which would create a duplicate pipeline
+    - if: '$CI_COMMIT_BRANCH'
+      when: manual
+      allow_failure: true
+    - if: '$CI_MERGE_REQUEST_ID'
+      when: manual
+      allow_failure: true
+
+# CONTAINERS creation stage
+.container_fedora_build_base:
+  extends: .fdo.container-build@fedora
+  stage: image-build
+  variables:
+    GIT_STRATEGY: none # no need to pull the whole tree for rebuilding the image
+    # a list of packages to install
+    FDO_DISTRIBUTION_PACKAGES:
+      $LIBFPRINT_DEPENDENCIES
+      vala
+      libpcap-devel
+      libudev-devel
+    FDO_DISTRIBUTION_EXEC: |
+      $LIBFPRINT_EXEC
+  rules:
+    - when: never
+
+.container_fedora_build_forced:
+  variables:
+    FDO_FORCE_REBUILD: 1
+
+container_fedora_build_schedule:
+  extends:
+    - .container_fedora_build_base
+    - .container_fedora_build_forced
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CRON_TASK == "BUILD_CI_IMAGES"
+      when: always
+
+container_fedora_build_manual:
+  extends:
+    - .container_fedora_build_base
+    - .container_fedora_build_forced
+  rules:
+    - if: $LIBFPRINT_CI_ACTION == "build-image"
+      when: always
+
+.container_fedora_build_on_deps_changed_rules:
+  rules:
+    - if: $CI_PROJECT_NAMESPACE == "libfprint" && $CI_PIPELINE_SOURCE != "schedule"
+      changes:
+        compare_to: 'refs/heads/master'
+        paths:
+          - '.gitlab-ci/libfprint-image-variables.yaml'
+          - '.gitlab-ci/libfprint-templates.yaml'
+
+container_fedora_build_on_deps_changed:
+  extends:
+    - .container_fedora_build_base
+    - .container_fedora_build_on_deps_changed_rules
+
+.container_fedora_image_build_base_s390x:
+  stage: image-build
+  image: quay.io/freedesktop.org/ci-templates:container-build-base-2026-05-19.0
+  variables:
+    GIT_STRATEGY: none
+    S390X_TAG: $LIBFPRINT_IMAGE_TAG-s390x
+    STORAGE_DRIVER: vfs
+  script:
+    - |
+      if [ -z "${FDO_FORCE_REBUILD:-}" ]; then
+        if skopeo inspect --no-tags --retry-times 3 "docker://$FEDORA_IMAGE_S390X" 2>/dev/null; then
+          echo "Image $FEDORA_IMAGE_S390X already exists, skipping build."
+          exit 0
+        fi
+      fi
+
+    - buildah from --name s390x-container --platform linux/s390x
+        registry.fedoraproject.org/fedora:$FDO_DISTRIBUTION_VERSION
+    - ROOTFS=$(buildah mount s390x-container)
+    - dnf install -y --installroot=$ROOTFS --forcearch=s390x
+        --use-host-config
+        --setopt=tsflags=noscripts --releasever=$FDO_DISTRIBUTION_VERSION
+        --setopt=install_weak_deps=False
+        $LIBFPRINT_DEPENDENCIES
+
+    - dnf clean all --installroot=$ROOTFS || true
+    - buildah commit s390x-container "$FEDORA_IMAGE_S390X"
+    - podman login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - buildah push "$FEDORA_IMAGE_S390X"
+
+container_fedora_build_schedule_s390x:
+  extends:
+    - .container_fedora_image_build_base_s390x
+    - .container_fedora_build_forced
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $CRON_TASK == "BUILD_CI_IMAGES"
+      when: always
+
+container_fedora_build_manual_s390x:
+  extends:
+    - .container_fedora_image_build_base_s390x
+    - .container_fedora_build_forced
+  rules:
+    - if: $LIBFPRINT_CI_ACTION == "build-image"
+      when: always
+
+container_fedora_build_on_deps_changed_s390x:
+  extends:
+    - .container_fedora_image_build_base_s390x
+    - .container_fedora_build_on_deps_changed_rules
+
+test_s390x:
+  stage: test
+  allow_failure: true
+  needs:
+    - job: container_fedora_build_manual_s390x
+      optional: true
+  variables:
+    STORAGE_DRIVER: vfs
+    QEMU_CPU: max
+  before_script:
+    # The s390x binaries are executed via the qemu-s390x-static registered in
+    # the *host* kernel's binfmt_misc. Use $FEDORA_IMAGE qemu-user-static
+    # (and systemd-binfmt), and run it privileged to re-register its handlers
+    # and make every run use the same emulator.
+    - podman run --rm --privileged
+        --security-opt label=filetype:container_file_t
+        --security-opt label=level:s0
+        --security-opt label=type:spc_t
+        -v $CI_PROJECT_DIR/.gitlab-ci/qemu-user-static/container-entrypoint:/container-entrypoint:z
+        $FEDORA_IMAGE /container-entrypoint
+  script:
+    - podman run --rm --platform linux/s390x -e QEMU_CPU -v $CI_PROJECT_DIR:/build:z -w /build "$FEDORA_IMAGE_S390X" /bin/bash -c \
+      "meson setup _build --werror -Ddrivers=all && meson test -C _build --print-errorlogs --no-stdsplit --timeout-multiplier 4 --suite=drivers --suite=virtual-driver"
+  artifacts:
+    when: always
+    paths:
+      - _build/meson-logs/
+    reports:
+      junit: "_build/meson-logs/testlog.junit.xml"
+  rules:
+    - if: $LIBFPRINT_CI_ACTION == "test-s390x"
+      when: always
+    - when: manual
+
+pages:
+  image: alpine:latest
+  stage: deploy
+  needs:
+    - job: test
+      artifacts: true
+    - job: build
+      artifacts: true
+  script:
+    - mkdir public
+    - mv _build/meson-logs/coveragereport public/coverage || true
+    - mv _build/doc/html public/doc
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_COMMIT_TAG

@@ -1,0 +1,14 @@
+# PAM wiring on Debian/Ubuntu — add this line to /etc/pam.d/common-auth
+# (insert it immediately before the pam_unix line of the auth stack):
+#
+#   auth       sufficient                  pam_fprintd.so
+#
+# Covers sudo, polkit, the display-manager login and lock screens — all
+# of them include common-auth. install.sh does this for you.
+
+auth       required    pam_faildelay.so        delay=3600000
+auth       sufficient  pam_fprintd.so
+auth       [success=1 default=ignore]  pam_unix.so nullok
+auth       requisite   pam_deny.so
+auth       required    pam_permit.so
+auth       optional    pam_cap.so
