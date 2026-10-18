@@ -1,0 +1,14 @@
+# PAM wiring — add this line to /etc/pam.d/system-auth
+# (on Arch, everything chains through system-auth: sudo, polkit-1,
+#  sddm, and the KDE lock screen via /usr/lib/pam.d/kde)
+#
+# Insert it immediately after the faillock preauth line:
+
+auth       required                    pam_faillock.so      preauth
+auth       sufficient                  pam_fprintd.so
+-auth      [success=2 default=ignore]  pam_systemd_home.so
+auth       [success=1 default=bad]     pam_unix.so          try_first_pass nullok
+auth       [default=die]               pam_faillock.so      authfail
+auth       optional                    pam_permit.so
+auth       required                    pam_env.so
+auth       required                    pam_faillock.so      authsucc
