@@ -28,7 +28,7 @@ package:
     - apk add --no-cache tar curl
     - mkdir -p dist
     - tar czf "dist/verimark-kit-${CI_COMMIT_TAG}.tar.gz"
-        --exclude-vcs --owner=0 --group=0
+        --exclude-vcs --exclude=./dist --owner=0 --group=0
         --transform "s,^\./,verimark-kit/," .
     - (cd dist && sha256sum "verimark-kit-${CI_COMMIT_TAG}.tar.gz" > SHA256SUMS)
     - "curl --silent --show-error --fail
