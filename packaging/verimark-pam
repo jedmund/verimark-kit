@@ -1,0 +1,47 @@
+#!/bin/bash
+# verimark-pam — wire (or unwire) fingerprint authentication for the
+# verimark-kit package on Arch Linux.
+#
+# Adds `auth sufficient pam_fprintd.so` to /etc/pam.d/system-auth (above
+# the pam_unix line), or removes it again. Everything on Arch chains
+# through system-auth: sudo, polkit, SDDM login, KDE lock screen.
+#
+# Usage:  sudo verimark-pam           # enable
+#         sudo verimark-pam remove    # disable
+set -euo pipefail
+
+PAM_FILE="/etc/pam.d/system-auth"
+PAM_LINE="auth       sufficient                  pam_fprintd.so"
+
+[[ $EUID -eq 0 ]] || { echo "Run as root: sudo verimark-pam"; exit 1; }
+[[ -f "$PAM_FILE" ]] || { echo "$PAM_FILE not found"; exit 1; }
+
+have_line() { grep -q "pam_fprintd.so" "$PAM_FILE"; }
+
+case "${1:-add}" in
+add)
+    if have_line; then
+        echo "pam_fprintd already present in $PAM_FILE"
+        exit 0
+    fi
+    if grep -q "pam_faillock.so      preauth" "$PAM_FILE"; then
+        sed -i "/pam_faillock.so      preauth/a $PAM_LINE" "$PAM_FILE"
+    else
+        sed -i "1a $PAM_LINE" "$PAM_FILE"
+    fi
+    echo "Added to $PAM_FILE: $PAM_LINE"
+    echo "Enroll a finger:  fprintd-enroll -f right-index-finger \$USER"
+    ;;
+remove)
+    if ! have_line; then
+        echo "No pam_fprintd line in $PAM_FILE"
+        exit 0
+    fi
+    sed -i "/pam_fprintd\.so/d" "$PAM_FILE"
+    echo "Removed pam_fprintd from $PAM_FILE"
+    ;;
+*)
+    echo "Usage: verimark-pam [remove]"
+    exit 2
+    ;;
+esac

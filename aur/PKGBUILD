@@ -1,0 +1,68 @@
+# Maintainer: jedmund <jedmund@users.noreply.github.com>
+# Contributor: https://github.com/jedmund/verimark-kit
+pkgname=verimark-kit
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Kensington VeriMark (047d:8228) fingerprint driver for libfprint — patched realtek driver, fprintd drop-in, PAM helper"
+arch=('x86_64')
+url="https://github.com/jedmund/verimark-kit"
+license=('LGPL2.1')
+depends=('glib2' 'libgusb' 'libusb' 'fprintd')
+makedepends=('meson' 'ninja' 'pkgconf' 'glib2-devel')
+checkdepends=()
+optdepends=()
+source=("$pkgname-$pkgver.tar.gz::https://github.com/jedmund/verimark-kit/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('c1536da1955c7d55098a39934b5538060f564d7207be0e3e1f81080876bda6a6')
+validpgpkeys=()
+
+build() {
+  cd "$pkgname-$pkgver/libfprint"
+  meson setup build \
+    -Ddrivers=realtek \
+    -Dtests=false \
+    -Dexamples=false \
+    -Ddoc=false \
+    -Dintrospection=false \
+    -Dudev_rules=disabled \
+    -Dudev_hwdb=disabled \
+    --prefix /usr
+  meson compile -C build
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  # The custom libfprint lives in its own directory; the fprintd vendor
+  # drop-in points fprintd at it via LD_LIBRARY_PATH, so the stock
+  # libfprint package is untouched (no file conflicts).
+  install -Dm755 libfprint/build/libfprint/libfprint-2.so.2.0.0 \
+    "$pkgdir/usr/lib/verimark/libfprint-2.so.2.0.0"
+  ln -s libfprint-2.so.2.0.0 "$pkgdir/usr/lib/verimark/libfprint-2.so.2"
+  ln -s libfprint-2.so.2.0.0 "$pkgdir/usr/lib/verimark/libfprint-2.so"
+
+  install -Dm644 packaging/verimark.conf \
+    "$pkgdir/usr/lib/systemd/system/fprintd.service.d/verimark.conf"
+  install -Dm755 packaging/verimark-pam "$pkgdir/usr/bin/verimark-pam"
+
+  install -Dm644 README.md "$pkgdir/usr/share/doc/verimark/README.md"
+  install -Dm644 docs/FINDINGS.md "$pkgdir/usr/share/doc/verimark/FINDINGS.md"
+  install -Dm644 docs/upstream-issue-draft.md "$pkgdir/usr/share/doc/verimark/upstream-issue-draft.md"
+}
+
+# Post-install notes (pacman prints these)
+post_install() {
+  cat <<EOF
+==> verimark-kit installed the Kensington VeriMark (047d:8228) driver.
+==> 1. Enable PAM fingerprint auth (covers sudo, polkit, SDDM, lock screen):
+==>       sudo verimark-pam
+==> 2. Enroll a finger:
+==>       fprintd-enroll -f right-index-finger \$USER
+==> 3. Test:
+==>       fprintd-verify \$USER && fprintd-list \$USER
+==> To uninstall the PAM line first: sudo verimark-pam remove
+EOF
+}
+
+post_upgrade() {
+  post_install "$1"
+}
