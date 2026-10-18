@@ -25,43 +25,41 @@ sanity-check:
     - test -f systemd/override.conf
     - echo "kit contents OK"
 
-.build: &build
+build:arch:
   stage: build
+  image: archlinux:base-devel
   rules:
     - if: $CI_COMMIT_TAG
-  variables:
-    BUILD_OPTS: "-Dtests=false -Dexamples=false -Ddoc=false"
   script:
-    - meson setup builddir ${BUILD_OPTS}
+    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb nss pixman libusb
+    - cd libfprint
+    - meson setup builddir -Dtests=false -Dexamples=false -Ddoc=false
     - meson compile -C builddir
-    - mkdir -p "artifacts/${LIB_DIR_NAME}"
-    - cp builddir/libfprint/libfprint-2.so.2.0.0 "artifacts/${LIB_DIR_NAME}/"
+    - mkdir -p "$CI_PROJECT_DIR/artifacts/arch"
+    - cp builddir/libfprint/libfprint-2.so.2.0.0 "$CI_PROJECT_DIR/artifacts/arch/"
   artifacts:
     paths:
       - artifacts/
     expire_in: 1 week
 
-build:arch:
-  <<: *build
-  image: archlinux:base-devel
-  variables:
-    LIB_DIR_NAME: arch
-    BUILD_OPTS: "-Dtests=false -Dexamples=false -Ddoc=false"
-  script:
-    - pacman -Syu --noconfirm --needed meson ninja gcc pkgconf glib2 libgusb nss pixman libusb
-    - !reference [.build, script]
-
 build:ubuntu-22.04:
-  <<: *build
+  stage: build
   image: ubuntu:22.04
-  variables:
-    LIB_DIR_NAME: ubuntu-22.04
-    BUILD_OPTS: "-Dtests=false -Dexamples=false -Ddoc=false"
+  rules:
+    - if: $CI_COMMIT_TAG
   script:
     - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq
         meson ninja-build gcc pkg-config libglib2.0-dev libgusb-dev libnss3-dev
         libpixman-1-dev libusb-1.0-0-dev
-    - !reference [.build, script]
+    - cd libfprint
+    - meson setup builddir -Dtests=false -Dexamples=false -Ddoc=false
+    - meson compile -C builddir
+    - mkdir -p "$CI_PROJECT_DIR/artifacts/ubuntu-22.04"
+    - cp builddir/libfprint/libfprint-2.so.2.0.0 "$CI_PROJECT_DIR/artifacts/ubuntu-22.04/"
+  artifacts:
+    paths:
+      - artifacts/
+    expire_in: 1 week
 
 package:
   stage: package
